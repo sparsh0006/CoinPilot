@@ -1,6 +1,6 @@
 import { DCAPlugin } from '../plugins/types';
 import { InjectivePlugin } from '../plugins/injective';
-import { TonPlugin } from '../plugins/ton';
+import { SonicPlugin } from '../plugins/sonic';
 import { InvestmentPlan, IInvestmentPlan, RiskLevel } from '../models/InvestmentPlan';
 import { User, IUser } from '../models/User';
 import cron from 'node-cron';
@@ -12,7 +12,7 @@ export class DCAService {
   private cronJobs: Map<string, cron.ScheduledTask>;
 
   constructor() {
-    this.plugin = process.env.BLOCKCHAIN_PLUGIN === 'ton' ? new TonPlugin() : new InjectivePlugin();
+    this.plugin = process.env.BLOCKCHAIN_PLUGIN === 'sonic' ? new SonicPlugin() : new InjectivePlugin();
     this.cronJobs = new Map();
     this.initializeExistingPlans();
   }

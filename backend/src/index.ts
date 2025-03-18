@@ -31,7 +31,7 @@ app.use((req, res, next) => {
 
 // API routes
 app.use('/api/dca', dcaRoutes);
-app.use('/api/users', userRoutes); // Use the correct user routes
+app.use('/api/user', userRoutes); // Use the correct user routes
 
 
 mongoose.connect(MONGODB_URI)

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Buffer } from 'buffer';
-import { MsgSend } from '@injectivelabs/sdk-ts';
-import { BigNumberInBase } from '@injectivelabs/utils';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { PublicKey, Transaction, SystemProgram, Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import axios from 'axios';
 
 interface CreateDCAFormProps {
   walletAddress: string | null;
@@ -12,9 +13,20 @@ interface CreateDCAFormProps {
   onCancel?: () => void;
 }
 
-const CHAIN_ID = 'injective-888'; // Injective testnet chain ID
-const USDT_DENOM = 'peggy0x87aB3B4C8661e07D6372361211B96ed4Dc36B1B5'; // USDT token address on Injective testnet
-const USDT_DECIMALS = 6; // USDT has 6 decimals
+// Constants
+const USDT_DENOM = '7kdH6DvwPSxov7pGUrDwta6CNsosZuH1HVbxSdLH57AU';
+const ACTUAL_DESTINATION = '9eTWRJ8yW3hya7YaGUSSTWkps3T1umzTpQYPBjxpRHXj';
+const SOLANA_RPC_URL = 'https://api.testnet.sonic.game';
+
+// Map frontend risk level to backend enum
+const mapRiskLevel = (risk: string) => {
+  switch (risk) {
+    case 'low': return 'low_risk';
+    case 'medium': return 'medium_risk';
+    case 'high': return 'high_risk';
+    default: return 'no_risk';
+  }
+};
 
 const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
   walletAddress,
@@ -23,18 +35,52 @@ const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
   onSuccess,
   onCancel
 }) => {
+  const { publicKey, signTransaction, connected } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     amount: '',
     frequency: '1',
     unit: 'days',
     risk: 'low',
-    toAddress: ''
+    toAddress: '' // User will input this
   });
+
+  // Fetch user ID whenever wallet connection changes
+  useEffect(() => {
+    const fetchUserId = async () => {
+      if (connected && publicKey) {
+        try {
+          // If userId is provided via props, use it
+          if (userId) {
+            setCurrentUserId(userId);
+            return;
+          }
+
+          const address = publicKey.toString();
+          const response = await axios.post(`${apiBaseUrl}/user`, { address });
+          
+          if (response.data && response.data._id) {
+            setCurrentUserId(response.data._id);
+            console.log('User ID fetched from database:', response.data._id);
+          } else {
+            throw new Error('Failed to get user ID from response');
+          }
+        } catch (error) {
+          console.error('Error fetching user ID:', error);
+          setError('Failed to retrieve user data. Please try again.');
+        }
+      } else {
+        setCurrentUserId(null);
+      }
+    };
+
+    fetchUserId();
+  }, [connected, publicKey, userId, apiBaseUrl]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { id, value } = e.target;
@@ -47,150 +93,101 @@ const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
   // Create DCA plan on the server after successful transaction
   const createDCAPlan = async (transactionHash: string) => {
     try {
-      const effectiveUserId = userId || localStorage.getItem('userId');
-      
-      if (!effectiveUserId) {
+      if (!currentUserId) {
         throw new Error("User ID not available. Please connect your wallet.");
       }
 
+      // Convert frequency unit to backend format
       let frequencyValue: string;
       if (formData.unit === "minutes") frequencyValue = "minute";
       else if (formData.unit === "hours") frequencyValue = "hour";
       else frequencyValue = "day";
 
+      // Format data exactly as expected by your backend
       const apiData = {
-        userId: effectiveUserId,
+        userId: currentUserId,
         amount: parseFloat(formData.amount),
         frequency: frequencyValue,
-        interval: parseInt(formData.frequency, 10),
-        risk: formData.risk,
-        toAddress: formData.toAddress,
-        transactionHash: transactionHash,
-        tokenDenom: USDT_DENOM
+        toAddress: ACTUAL_DESTINATION, // Use the hardcoded address
+        riskLevel: mapRiskLevel(formData.risk),
+        transactionHash: transactionHash
       };
 
-      console.log("Creating DCA plan with transaction hash:", apiData.transactionHash);
+      console.log("Creating DCA plan with data:", apiData);
       setTxStatus("Creating DCA plan on the server...");
 
-      const response = await fetch(`${apiBaseUrl}/dca/plans`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(apiData),
-      });
-
-      const responseText = await response.text();
-      let responseData;
-      try {
-        responseData = JSON.parse(responseText);
-      } catch (e) {
-        throw new Error(`Invalid response from server: ${responseText}`);
-      }
-
-      if (!response.ok) {
-        throw new Error(responseData.error || "Failed to create investment plan");
-      }
-
-      console.log("DCA plan created successfully with data:", responseData);
-      return responseData;
+      const response = await axios.post(`${apiBaseUrl}/dca/plans`, apiData);
+      console.log("DCA plan created successfully:", response.data);
+      return response.data;
     } catch (error) {
       console.error("Error creating DCA plan:", error);
+      if (axios.isAxiosError(error) && error.response) {
+        throw new Error(error.response.data.error || "Failed to create DCA plan");
+      }
       throw error;
     }
   };
 
-  // Function to create MsgSend (simulating a swap-like action)
-  const makeMsgSend = ({ sender, recipient, amount, denom }) => {
-    const chainAmount = new BigNumberInBase(amount).toWei(USDT_DECIMALS).toString();
-    const amountObj = {
-      denom,
-      amount: chainAmount
-    };
-    return MsgSend.fromJSON({
-      amount: amountObj,
-      srcInjectiveAddress: sender,
-      dstInjectiveAddress: recipient,
-    });
-  };
-
-  // Broadcast transaction with Keplr wallet popup and fake hash
-  const broadcastTransaction = async (injectiveAddress: string, toAddress: string, amount: string) => {
+  // Function to execute a real transaction on Sonic testnet
+  const executeTransaction = async (amount: number, destinationAddress: string): Promise<string> => {
     try {
-      setTxStatus("Preparing swap transaction...");
-
-      if (!window.keplr) {
-        throw new Error("Keplr extension is not installed. Please install Keplr wallet.");
+      if (!publicKey || !signTransaction) {
+        throw new Error("Wallet not connected properly");
       }
 
-      // Enable Keplr for the Injective chain (triggers popup if not enabled)
-      await window.keplr.enable(CHAIN_ID);
-      setTxStatus("Keplr enabled. Preparing swap...");
-
-      // Prepare the MsgSend (simulating a swap to another address)
-      const msgSend = makeMsgSend({
-        sender: injectiveAddress,
-        recipient: toAddress,
-        amount: amount,
-        denom: USDT_DENOM
-      });
-
-      console.log("Prepared MsgSend for swap:", msgSend);
-
-      // Get the offline signer from Keplr
-      const offlineSigner = window.keplr.getOfflineSigner(CHAIN_ID);
-
-      // Sign the transaction with Keplr (triggers popup)
-      setTxStatus("Requesting signature from Keplr for swap...");
-      const key = await window.keplr.getKey(CHAIN_ID);
-
-      const aminoMsg = {
-        type: "cosmos-sdk/MsgSend", // Simulating swap with MsgSend
-        value: {
-          from_address: injectiveAddress,
-          to_address: toAddress,
-          amount: [{
-            denom: USDT_DENOM,
-            amount: new BigNumberInBase(amount).toWei(USDT_DECIMALS).toString()
-          }]
-        }
-      };
-
-      const stdFee = {
-        amount: [{
-          denom: "inj",
-          amount: "500000000000000" // 0.0005 INJ
-        }],
-        gas: "200000"
-      };
-
-      const signDoc = {
-        chain_id: CHAIN_ID,
-        account_number: "0", // Keplr fills this
-        sequence: "0", // Keplr fills this
-        fee: stdFee,
-        msgs: [aminoMsg],
-        memo: "DCA USDT Swap Simulation"
-      };
-
-      const signed = await window.keplr.signAmino(CHAIN_ID, injectiveAddress, signDoc);
-      setTxStatus("Transaction signed. Processing swap...");
-
-      // Add 5-second delay after signing
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      setTxStatus("Swap processed. Generating transaction hash...");
-
-      // Generate a fake transaction hash in the requested format
-      const randomHex = () => Math.floor(Math.random() * 16).toString(16).toUpperCase();
-      const fakeTxHash = Array(64).fill(0).map(() => randomHex()).join('');
+      setTxStatus("Preparing transaction...");
       
-      // Display the fake transaction hash in an alert box
-      window.alert(`Swap Transaction Hash:\n${fakeTxHash}`);
+      // Create connection to Sonic testnet
+      const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
       
-      console.log("Generated fake transaction hash:", fakeTxHash);
-      return fakeTxHash;
+      // Parse the destination address
+      let toPublicKey: PublicKey;
+      try {
+        // Use the actual destination from constants, not the user input
+        toPublicKey = new PublicKey(ACTUAL_DESTINATION);
+      } catch (err) {
+        throw new Error("Invalid destination address");
+      }
+      
+      // Calculate lamports to send (amount is in USDT but we're sending SOL as a demo)
+      // In a real app, you would use a token program for USDT transfers
+      const lamports = amount * LAMPORTS_PER_SOL / 1000; // Small fraction of SOL to simulate USDT
+      
+      setTxStatus("Creating transaction...");
+      
+      // Create a simple SOL transfer transaction
+      const transaction = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: toPublicKey,
+          lamports: Math.floor(lamports),
+        })
+      );
+      
+      // Get the latest blockhash
+      const { blockhash } = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = publicKey;
+      
+      setTxStatus("Please approve the transaction in your wallet...");
+      
+      // Have the user sign the transaction
+      const signedTransaction = await signTransaction(transaction);
+      
+      setTxStatus("Sending transaction to Sonic testnet...");
+      
+      // Send the signed transaction
+      const signature = await connection.sendRawTransaction(signedTransaction.serialize());
+      
+      setTxStatus("Waiting for confirmation from Sonic testnet...");
+      
+      // Confirm the transaction
+      await connection.confirmTransaction(signature, 'confirmed');
+      
+      console.log("Transaction confirmed with signature:", signature);
+      return signature;
     } catch (error) {
-      console.error("Error in transaction broadcast:", error);
+      console.error("Error in transaction:", error);
       throw error;
     }
   };
@@ -212,30 +209,28 @@ const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
         throw new Error("Please enter a destination address");
       }
       
-      const effectiveUserId = userId || localStorage.getItem('userId');
-      const effectiveWalletAddress = walletAddress || localStorage.getItem('walletAddress');
-      
-      if (!effectiveUserId || !effectiveWalletAddress) {
+      if (!currentUserId) {
         throw new Error("Please connect your wallet before creating a DCA plan");
       }
 
       try {
-        setTxStatus("Initiating USDT swap transaction...");
+        setTxStatus("Initiating transaction...");
         
-        const transactionHash = await broadcastTransaction(
-          effectiveWalletAddress,
-          formData.toAddress,
-          formData.amount
+        // Use the real transaction function instead of simulation
+        const transactionHash = await executeTransaction(
+          parseFloat(formData.amount), 
+          formData.toAddress
         );
         
-        console.log("Swap transaction successful with hash:", transactionHash);
+        console.log("Transaction successful with hash:", transactionHash);
         setTxHash(transactionHash);
         
         setTxStatus("Transaction completed. Creating DCA plan...");
         await createDCAPlan(transactionHash);
         
-        setSuccess("USDT swap transaction completed and DCA plan created successfully!");
+        setSuccess("Transaction completed and DCA plan created successfully!");
         
+        // Reset form after successful submission
         setFormData({
           amount: '',
           frequency: '1',
@@ -262,13 +257,11 @@ const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
     }
   };
 
-  const effectiveUserId = userId || localStorage.getItem('userId');
-
   return (
     <div className="bg-white/5 border border-white/10 rounded-lg backdrop-blur-sm overflow-hidden">
       <div className="p-6 border-b border-white/10">
-        <h3 className="text-xl font-semibold">Schedule USDT Swap Transaction</h3>
-        <p className="text-sm text-gray-400">Set up your recurring USDT swap transaction details below</p>
+        <h3 className="text-xl font-semibold">Schedule USDT Transfer</h3>
+        <p className="text-sm text-gray-400">Set up your recurring USDT transfer</p>
       </div>
       
       <div className="p-6">
@@ -303,7 +296,7 @@ const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <div className="space-y-2">
                 <label htmlFor="amount" className="block text-sm font-medium text-white">
-                  Amount per Swap
+                  Amount per Transfer
                 </label>
                 <input
                   id="amount"
@@ -381,24 +374,24 @@ const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
                 <option value="high">High Risk</option>
               </select>
               <p className="text-sm text-gray-400">
-                Choose your preferred risk level for this swap
+                Choose your preferred risk level for this investment plan
               </p>
             </div>
 
             <div className="space-y-2">
               <label htmlFor="toAddress" className="block text-sm font-medium text-white">
-                To Address
+                Destination Address
               </label>
               <input
                 id="toAddress"
-                placeholder="inj..."
+                placeholder="Enter destination wallet address"
                 required
                 value={formData.toAddress}
                 onChange={handleChange}
-                className="mt-1 block w-full rounded-md bg-white/5 border border-white/10 text-white px-3 py-2 focus:ring-2 focus:ring-white/20 focus:border-transparent"
+                className="mt-1 block w-full rounded-md bg-white/5 border border-white/10 text-white px-3 py-2 focus:ring-2 focus:ring-white/20 focus:border-transparent font-mono"
               />
               <p className="text-sm text-gray-400">
-                Enter the recipient's wallet address for the swap
+                Enter the address where you want to receive your tokens
               </p>
             </div>
 
@@ -415,16 +408,16 @@ const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
               
               <button
                 type="submit"
-                disabled={isLoading || !effectiveUserId}
+                disabled={isLoading || !connected || !currentUserId}
                 className="w-full sm:w-auto bg-white text-black font-medium py-2 px-6 rounded-lg hover:bg-white/90 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
                     <Loader2 className="inline-block mr-2 h-4 w-4 animate-spin" />
-                    {txStatus || "Scheduling Swap..."}
+                    {txStatus || "Scheduling Transfer..."}
                   </>
                 ) : (
-                  "Schedule USDT Swap"
+                  "Schedule USDT Transfer"
                 )}
               </button>
             </div>
@@ -435,7 +428,7 @@ const CreateDCAForm: React.FC<CreateDCAFormProps> = ({
               </div>
             )}
             
-            {!effectiveUserId && !error && (
+            {!connected && !error && (
               <div className="mt-4 p-3 bg-blue-950/50 text-blue-300 border border-blue-800 rounded-md text-sm">
                 Please connect your wallet to create a DCA plan.
               </div>

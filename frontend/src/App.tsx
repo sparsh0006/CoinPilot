@@ -1,45 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import CreateDCAForm from './components/CreateDCAForm';
 import ViewDCAPlans from './components/ViewDCAPlans';
-import KeplrWallet from './components/KeplrWallet';
 
 function App() {
-  const [walletConnected, setWalletConnected] = useState(false);
   const [currentView, setCurrentView] = useState('home'); // 'home', 'create', 'view'
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [refreshPlans, setRefreshPlans] = useState(0); // To trigger refreshing plans on successful creation
 
-  const handleWalletConnection = (address: string) => {
-    setWalletConnected(true);
-  };
+  // Check for stored data on component mount
+  useEffect(() => {
+    const storedWalletAddress = localStorage.getItem('walletAddress');
+    const storedUserId = localStorage.getItem('userId');
+    
+    if (storedWalletAddress) setWalletAddress(storedWalletAddress);
+    if (storedUserId) setUserId(storedUserId);
+  }, []);
 
   const handleCreatePlan = () => {
-    if (!walletConnected) {
-      alert('Please connect your wallet first');
-      return;
-    }
     setCurrentView('create');
   };
 
   const handleViewPlans = () => {
-    if (!walletConnected) {
-      alert('Please connect your wallet first');
-      return;
-    }
     setCurrentView('view');
   };
 
   const backToOptions = () => {
     setCurrentView('home');
-  };
-
-  const handleConnect = (address: string, userId: string) => {
-    console.log('Wallet connected:', address, 'User ID:', userId);
-    setWalletAddress(address);
-    setUserId(userId);
-    setWalletConnected(true);
   };
 
   const handleDCASuccess = () => {
@@ -55,9 +43,8 @@ function App() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <Navbar onConnect={handleWalletConnection} />
-      <KeplrWallet onConnect={handleConnect} />
-      
+      <Navbar />
+     
       {currentView === 'home' && (
         <div className="pt-32 px-4">
           <div className="max-w-4xl mx-auto text-center">
@@ -91,26 +78,21 @@ function App() {
               </div>
             </div>
 
-            {!walletConnected ? (
-              <div className="text-center">
-                <p className="text-lg text-gray-400 mb-4">Connect your wallet to get started</p>
-              </div>
-            ) : (
-              <div className="flex flex-col sm:flex-row justify-center gap-4">
-                <button
-                  onClick={handleCreatePlan}
-                  className="bg-white text-black px-8 py-3 rounded-lg text-lg font-medium hover:bg-white/90 transition-colors"
-                >
-                  Create DCA Plan
-                </button>
-                <button
-                  onClick={handleViewPlans}
-                  className="bg-white/10 text-white px-8 py-3 rounded-lg text-lg font-medium hover:bg-white/20 transition-colors"
-                >
-                  View DCA Plans
-                </button>
-              </div>
-            )}
+            {/* Always display buttons regardless of wallet connection */}
+            <div className="flex flex-col sm:flex-row justify-center gap-4">
+              <button
+                onClick={handleCreatePlan}
+                className="bg-white text-black px-8 py-3 rounded-lg text-lg font-medium hover:bg-white/90 transition-colors"
+              >
+                Create DCA Plan
+              </button>
+              <button
+                onClick={handleViewPlans}
+                className="bg-white/10 text-white px-8 py-3 rounded-lg text-lg font-medium hover:bg-white/20 transition-colors"
+              >
+                View DCA Plans
+              </button>
+            </div>
           </div>
         </div>
       )}
