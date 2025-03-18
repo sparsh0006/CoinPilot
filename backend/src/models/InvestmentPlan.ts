@@ -1,3 +1,5 @@
+// src/models/InvestmentPlan.ts
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IInvestmentPlan extends Document {
@@ -9,6 +11,7 @@ export interface IInvestmentPlan extends Document {
   isActive: boolean;
   lastExecutionTime: Date;
   totalInvested: number;
+  needsClientExecution: boolean; // New field
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,9 +27,10 @@ const InvestmentPlanSchema: Schema = new Schema({
   toAddress: { type: String, required: true },
   isActive: { type: Boolean, default: true },
   lastExecutionTime: { type: Date, default: null },
-  totalInvested: { type: Number, default: 0 }
+  totalInvested: { type: Number, default: 0 },
+  needsClientExecution: { type: Boolean, default: false } // Add this field
 }, {
   timestamps: true
 });
 
-export const InvestmentPlan = mongoose.model<IInvestmentPlan>('InvestmentPlan', InvestmentPlanSchema); 
+export const InvestmentPlan = mongoose.model<IInvestmentPlan>('InvestmentPlan', InvestmentPlanSchema);

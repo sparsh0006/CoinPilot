@@ -50,7 +50,7 @@ export class DCAService {
         user.address,
         plan.toAddress
       );
-
+      console.log(plan.toAddress)
       plan.lastExecutionTime = new Date();
       plan.totalInvested += plan.amount;
       await plan.save();
