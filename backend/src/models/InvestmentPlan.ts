@@ -1,6 +1,11 @@
-// src/models/InvestmentPlan.ts
-
 import mongoose, { Schema, Document } from 'mongoose';
+
+export enum RiskLevel {
+  NO_RISK = 'no_risk',
+  LOW_RISK = 'low_risk',
+  MEDIUM_RISK = 'medium_risk',
+  HIGH_RISK = 'high_risk'
+}
 
 export interface IInvestmentPlan extends Document {
   _id: mongoose.Types.ObjectId;
@@ -11,14 +16,17 @@ export interface IInvestmentPlan extends Document {
   isActive: boolean;
   lastExecutionTime: Date;
   totalInvested: number;
-  needsClientExecution: boolean; // New field
   createdAt: Date;
   updatedAt: Date;
+  executionCount: number;
+  initialAmount: number;
+  riskLevel: RiskLevel;
 }
 
 const InvestmentPlanSchema: Schema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   amount: { type: Number, required: true },
+  initialAmount: { type: Number, required: true },
   frequency: { 
     type: String, 
     required: true,
@@ -28,7 +36,13 @@ const InvestmentPlanSchema: Schema = new Schema({
   isActive: { type: Boolean, default: true },
   lastExecutionTime: { type: Date, default: null },
   totalInvested: { type: Number, default: 0 },
-  needsClientExecution: { type: Boolean, default: false } // Add this field
+  executionCount: { type: Number, default: 0 },
+  riskLevel: { 
+    type: String, 
+    enum: Object.values(RiskLevel),
+    default: RiskLevel.NO_RISK,
+    required: true 
+  }
 }, {
   timestamps: true
 });
