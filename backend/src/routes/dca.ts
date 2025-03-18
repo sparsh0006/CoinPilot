@@ -1,6 +1,7 @@
 import express from 'express';
 import { DCAService } from '../services/DCAService';
 import { logger } from '../utils/logger';
+import { RiskLevel } from '../models/InvestmentPlan';
 
 const router = express.Router();
 const dcaService = new DCAService();
@@ -8,16 +9,22 @@ const dcaService = new DCAService();
 // Create a new DCA plan
 router.post('/plans', async (req, res) => {
   try {
-    const { userId, amount, frequency, toAddress } = req.body;
+    const { userId, amount, frequency, toAddress, riskLevel } = req.body;
     
     if (!userId || !amount || !frequency || !toAddress) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    // Validate risk level
+    if (riskLevel && !Object.values(RiskLevel).includes(riskLevel)) {
+      return res.status(400).json({ error: 'Invalid risk level' });
+    }
+
     const plan = await dcaService.createPlan(userId, {
       amount,
       frequency,
-      toAddress
+      toAddress,
+      riskLevel: riskLevel || RiskLevel.NO_RISK
     });
 
     res.json(plan);
