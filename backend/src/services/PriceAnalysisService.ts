@@ -13,6 +13,7 @@ const openai = new OpenAI({
 
 interface PriceData {
   date: string;
+  timestamp: number; // Added timestamp for easier comparison
   price: number;
 }
 
@@ -36,6 +37,7 @@ async function fetchHistoricalPrices(tokenId: string, days: number = 30): Promis
     const data = response.data as { prices: [number, number][] };
     return data.prices.map((item: [number, number]) => ({
       date: new Date(item[0]).toISOString(),
+      timestamp: item[0], // Store the timestamp for easier comparison
       price: item[1],
     }));
   } catch (error) {
@@ -59,51 +61,49 @@ function calculatePriceChangePercentage(prices: PriceData[]): number {
     throw new Error('Not enough price data to calculate price change');
   }
 
-  // Group data points by day to find the last day's price
-  const dateMap = new Map<string, PriceData[]>();
+  // Sort prices by timestamp in ascending order to ensure chronological order
+  const sortedPrices = [...prices].sort((a, b) => a.timestamp - b.timestamp);
   
-  prices.forEach(priceData => {
-    const date = new Date(priceData.date);
-    const dayKey = `${date.getUTCFullYear()}-${(date.getUTCMonth() + 1).toString().padStart(2, '0')}-${date.getUTCDate().toString().padStart(2, '0')}`;
-    
-    if (!dateMap.has(dayKey)) {
-      dateMap.set(dayKey, []);
+  // Get the latest price
+  const latestPrice = sortedPrices[sortedPrices.length - 1];
+  
+  // Find the price closest to 24 hours ago
+  const oneDayMs = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+  const targetTimestamp = latestPrice.timestamp - oneDayMs;
+  
+  // Find the price data point closest to 24 hours ago
+  let closestPricePoint = sortedPrices[0];
+  let smallestDiff = Math.abs(sortedPrices[0].timestamp - targetTimestamp);
+  
+  for (let i = 1; i < sortedPrices.length; i++) {
+    const diff = Math.abs(sortedPrices[i].timestamp - targetTimestamp);
+    if (diff < smallestDiff) {
+      smallestDiff = diff;
+      closestPricePoint = sortedPrices[i];
     }
-    dateMap.get(dayKey)!.push(priceData);
-  });
-  
-  const groupedByDay = Array.from(dateMap.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]));
-  
-  if (groupedByDay.length < 2) {
-    throw new Error('Not enough days of price data to calculate day-over-day change');
   }
   
-  const previousDayData = groupedByDay[groupedByDay.length - 2][1];
-  const oldPrice = previousDayData[previousDayData.length - 1].price; // Last price of previous day
-  
-  const currentDayData = groupedByDay[groupedByDay.length - 1][1];
-  const currentPrice = currentDayData[currentDayData.length - 1].price; // Latest price of current day
-  const percentageChange = ((currentPrice - oldPrice) / oldPrice) * 100;
+  // Calculate percentage change using true 24-hour window
+  const percentageChange = ((latestPrice.price - closestPricePoint.price) / closestPricePoint.price) * 100;
   
   return percentageChange;
 }
 
 export async function analyzeTokenPrice(tokenId: string = 'sonic-svm'): Promise<AnalysisResult> {
   try {
-    // Fetch historical price data
-    const priceData = await fetchHistoricalPrices(tokenId);
+    // Fetch historical price data with extra days to ensure we have enough data points
+    const priceData = await fetchHistoricalPrices(tokenId, 31);
     
     const movingAverage7Day = calculateMovingAverage(priceData, 7);
-    const movingAverage30Day = calculateMovingAverage(priceData, 30);
+    const movingAverage30Day = calculateMovingAverage(priceData, Math.min(30, priceData.length));
     
-    // Calculate 1-day price change percentage
+    // Calculate price change percentage using 24-hour rolling window
     const priceChangePercentage = calculatePriceChangePercentage(priceData);
     const isPriceGoingUp = priceChangePercentage > 0;
     
     // Use OpenAI to analyze the data and provide a factor between 0-1 or 1-2
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-3.5-turbo",
       messages: [
         {
           role: "system",
@@ -111,8 +111,8 @@ export async function analyzeTokenPrice(tokenId: string = 'sonic-svm'): Promise<
           
           - If price is dropping (negative price change %), return a number between 0 and 1:
             * For minimal price drops (0 to -3%), return a number close to 1 (0.7-1.0)
-            * For moderate price drops (-3% to -10%), return a mid-range number (0.3-0.7)
-            * For significant price drops (< -10%), return a number close to 0 (0.0-0.3)
+            * For moderate price drops (-3% to -10%), return a mid-range number (0.4-0.7)
+            * For significant price drops (< -10%), return a number close to 0 (0.1-0.3)
           
           - If price is rising (positive price change %), return a number between 1 and 2:
             * For minimal price increases (0-3%), return a number close to 1 (1.0-1.3)
@@ -129,7 +129,7 @@ export async function analyzeTokenPrice(tokenId: string = 'sonic-svm'): Promise<
           Token: ${tokenId}
           7-Day Moving Average: $${movingAverage7Day.toFixed(4)}
           30-Day Moving Average: $${movingAverage30Day.toFixed(4)}
-          1-Day Price Change: ${priceChangePercentage.toFixed(2)}%
+          24-Hour Price Change: ${priceChangePercentage.toFixed(2)}%
           `
         }
       ],
